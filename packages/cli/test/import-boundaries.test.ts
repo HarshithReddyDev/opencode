@@ -15,14 +15,17 @@ describe("CLI frontend import boundaries", () => {
     expect(imports).toEqual([])
   })
 
-  test("keeps ACP and its tests off the promise client", async () => {
+  test("keeps ACP and its tests off the promise client and ACP off the TUI", async () => {
     const glob = new Bun.Glob("{src,test}/acp/**/*.ts")
     const imports: string[] = []
+    const tui: string[] = []
     for await (const file of glob.scan({ cwd: path.join(root, "packages/cli") })) {
       const source = await Bun.file(path.join(root, "packages/cli", file)).text()
       if (/["']@opencode\/client(?:\/promise(?:\/[^"']*)?|\/service)?["']/.test(source)) imports.push(file)
+      if (file.startsWith("src/") && /["']@opencode\/tui(?:\/[^"']*)?["']/.test(source)) tui.push(file)
     }
     expect(imports).toEqual([])
+    expect(tui).toEqual([])
   })
 
   test("exposes only the intentional package entrypoints", async () => {
