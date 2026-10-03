@@ -3,13 +3,13 @@ export * as ReadToolFileSystem from "./read-filesystem.js"
 import path from "path"
 import { pathToFileURL } from "url"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { FileContent, ListEntry, ListPage, TextPage } from "@opencode/schema/read-output"
 import { Context, Effect, Layer, Schema } from "effect"
 import { lookup } from "mime-types"
 import { Environment } from "../environment/index.js"
 import type { Files } from "../environment/index.js"
+import { FileSystem } from "../filesystem.js"
 import { Mime } from "../mime.js"
-import { AbsolutePath, NonNegativeInt, RelativePath } from "../schema.js"
+import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath } from "../schema.js"
 
 export const MAX_READ_LINES = 2_000
 export const MAX_READ_BYTES = 50 * 1024
@@ -72,7 +72,33 @@ export const PageInput = Schema.Struct({
 })
 export type PageInput = typeof PageInput.Type
 
-export { FileContent, ListEntry, ListPage, TextPage }
+export const FileContent = Schema.Struct({
+  type: Schema.Literal("file"),
+  ...FileSystem.Content.fields,
+}).annotate({ identifier: "ReadTool.FileContent" })
+export type FileContent = typeof FileContent.Type
+
+export class TextPage extends Schema.Class<TextPage>("ReadTool.TextPage")({
+  type: Schema.Literal("text-page"),
+  content: Schema.String,
+  mime: Schema.String,
+  offset: PositiveInt,
+  truncated: Schema.Boolean,
+  next: Schema.optionalKey(PositiveInt),
+}) {}
+
+export interface ListEntry extends Schema.Schema.Type<typeof ListEntry> {}
+export const ListEntry = Schema.Struct({
+  path: RelativePath,
+  type: Schema.Literals(["file", "directory", "symlink"]),
+}).annotate({ identifier: "ReadTool.ListEntry" })
+
+export class ListPage extends Schema.Class<ListPage>("ReadTool.ListPage")({
+  type: Schema.Literal("list-page"),
+  entries: Schema.Array(ListEntry),
+  truncated: Schema.Boolean,
+  next: Schema.optionalKey(PositiveInt),
+}) {}
 
 export interface Interface {
   readonly list: (path: AbsolutePath) => ReturnType<Files["list"]>
