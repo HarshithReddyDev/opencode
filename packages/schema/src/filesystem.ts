@@ -42,6 +42,15 @@ export class FindInput extends Schema.Class<FindInput>("FileSystem.FindInput")({
   limit: PositiveInt.pipe(optional),
 }) {}
 
+export const Content = Schema.Struct({
+  uri: Schema.String,
+  name: Schema.String.pipe(Schema.optional),
+  content: Schema.String,
+  encoding: Schema.Literals(["utf8", "base64"]),
+  mime: Schema.String,
+}).annotate({ identifier: "FileSystem.Content" })
+export type Content = typeof Content.Type
+
 export interface Write extends Schema.Schema.Type<typeof Write> {}
 export const Write = Schema.Struct({
   path: AbsolutePath,

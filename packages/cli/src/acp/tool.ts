@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path"
 import type { ToolCall, ToolCallContent, ToolCallLocation, ToolCallUpdate, ToolKind } from "@agentclientprotocol/sdk"
+import { ReadOutput } from "@opencode/schema/read-output"
 import { Tool } from "@opencode/schema/tool"
-import { readDisplayText } from "@opencode/tui/mini/tool"
 import { Patch } from "@opencode/util/patch"
 import { Result } from "effect"
 
@@ -100,7 +100,8 @@ export function completedToolUpdate(input: {
 }): ToolCallUpdate {
   const normalized = toolContent(input.content)
   const firstText = input.content.find((part) => part.type === "text")
-  const read = canonicalName(input.toolName) === "read" && firstText ? readDisplayText(firstText.text) : undefined
+  const read =
+    canonicalName(input.toolName) === "read" && firstText ? ReadOutput.displayText(firstText.text) : undefined
   const images = normalized.filter((part) => part.type === "content" && part.content.type === "image")
   const primary =
     read === undefined

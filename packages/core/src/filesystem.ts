@@ -8,7 +8,7 @@ import { Location } from "./location.js"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema.js"
 import { FileSystemSearch } from "./filesystem/search.js"
 import { Entry, FileSystem, FindInput, Write } from "@opencode/schema/filesystem"
-export { Entry, Match, Submatch } from "@opencode/schema/filesystem"
+export { Content, Entry, Match, Submatch } from "@opencode/schema/filesystem"
 
 export const ReadInput = Schema.Struct({
   path: RelativePath,
@@ -49,15 +49,6 @@ export class DirectoryAccessDeniedError extends Schema.TaggedError<DirectoryAcce
     return `Access denied to directory: ${this.directory}`
   }
 }
-
-export const Content = Schema.Struct({
-  uri: Schema.String,
-  name: Schema.String.pipe(Schema.optional),
-  content: Schema.String,
-  encoding: Schema.Literals(["utf8", "base64"]),
-  mime: Schema.String,
-}).annotate({ identifier: "FileSystem.Content" })
-export type Content = typeof Content.Type
 
 export const ListInput = Schema.Struct({
   path: Schema.String.pipe(Schema.optional),

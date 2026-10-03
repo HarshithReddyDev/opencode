@@ -5,6 +5,7 @@ import { basename, dirname, join } from "path"
 import { ToolFailure } from "@opencode/ai"
 import { Effect, Schema } from "effect"
 import { FSUtil } from "@opencode/util/fs-util"
+import { ReadOutput } from "@opencode/schema/read-output"
 import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
 import { SessionInstructions } from "../../session/instructions.js"
@@ -24,7 +25,6 @@ const LocationInput = Schema.Struct({
   }),
 })
 export const Input = LocationInput
-const Output = Schema.Union([ReadToolFileSystem.FileContent, ReadToolFileSystem.TextPage, ReadToolFileSystem.ListPage])
 
 export const Plugin = {
   id: "opencode.tool.read",
@@ -43,7 +43,7 @@ export const Plugin = {
           description:
             "Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.",
           input: Input,
-          output: Output,
+          output: ReadOutput.Output,
           execute: (input, context) => {
             return Effect.gen(function* () {
               const read = (target: FileAccess.Target) =>
@@ -172,7 +172,7 @@ export const Plugin = {
   }),
 }
 
-export const toModelContent = (path: string, offset: number | undefined, output: typeof Output.Type) => {
+export const toModelContent = (path: string, offset: number | undefined, output: typeof ReadOutput.Output.Type) => {
   if (output.type === "file" && output.encoding === "base64")
     return [
       { type: "text", text: output.mime === "application/pdf" ? "PDF read successfully" : "Image read successfully" },
