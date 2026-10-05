@@ -27,7 +27,7 @@ export function storeName(extension: string, key: string) {
 
 /** Where `Storage.store` keeps an extension's app-wide store, with the older keys it imports. */
 export function globalStoreTarget(extension: string, key: string, from: StoreFrom | readonly StoreFrom[] | undefined) {
-  return { ...Persist.global(storeName(extension, key)), copyFrom: storeImports(from) }
+  return { ...Persist.global(storeName(extension, key)), sync: true, copyFrom: storeImports(from) }
 }
 
 /**

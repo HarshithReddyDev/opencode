@@ -1,9 +1,16 @@
 export default {
   "command.title": "Ask a side question",
-  "command.description": "Get a one-shot answer without adding to the conversation",
+  "command.description": "Start a side conversation without adding to the main conversation",
   "tab.title": "/btw",
   "question.required": "Add a question after /btw",
   error: "Couldn’t answer that question",
   retry: "Retry",
   copy: "Copy answer",
+  "followUp.label": "Side conversation message",
+  "followUp.placeholder": "Ask a follow-up…",
+  "followUp.send": "Send",
+  "history.title": "Open side conversation",
+  "history.description": "Reopen a saved side conversation for this session",
+  "history.search": "Search side conversations",
+  "history.empty": "No saved side conversations",
 }
