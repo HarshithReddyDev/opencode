@@ -95,8 +95,7 @@ export function contenderPool(timing: EnsureTiming) {
       if (finished.some((item) => item.child.exitCode === 0))
         spawnDelay = Math.min(spawnDelay * 2, timing.maxSpawnDelay)
       finished.forEach((item) => contenders.delete(item))
-      if (failure !== undefined && contenders.size === 0) return failure
-      return undefined
+      return contenders.size === 0 ? failure : undefined
     },
     /**
      * Whether to start another attempt now. A registration that has not answered yet gets one
