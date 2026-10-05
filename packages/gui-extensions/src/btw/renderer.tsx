@@ -59,7 +59,7 @@ const setup: Setup<typeof Btw> = (ctx) => {
       tabs.set(input.session.key, cache)
 
       return input.open.flatMap((id) => {
-        if (saved.ready() && !saved.value?.questions.some((item) => item.id === id)) return []
+        if (saved.ready() && !saved.value?.chats.some((item) => item.id === id)) return []
 
         const existing = cache.get(id)
 
@@ -68,7 +68,7 @@ const setup: Setup<typeof Btw> = (ctx) => {
         const tab: PanelTab = {
           id,
           get title() {
-            return saved.value?.questions.find((item) => item.id === id)?.question ?? ctx.t("tab.title")
+            return saved.value?.chats.find((item) => item.id === id)?.question ?? ctx.t("tab.title")
           },
           get hidden() {
             return !saved.ready()

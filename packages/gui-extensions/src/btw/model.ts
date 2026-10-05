@@ -15,7 +15,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
   const owner = getOwner()
   const controllers = new Map<string, AbortController>()
   const [requests, setRequests] = createStore<{ pending: string[] }>({ pending: [] })
-  const saved = (session: MountedSession) => ctx.stores.questions(session)
+  const saved = (session: MountedSession) => ctx.stores.chats(session)
 
   const stop = (id: string) => {
     controllers.get(id)?.abort()
@@ -27,7 +27,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
   // closing the question's tab or disposing the extension abandons one, which leaves it retryable.
   onCleanup(() => Array.from(controllers.keys()).forEach(stop))
 
-  const entry = (session: MountedSession, id: string) => saved(session).value?.questions.find((item) => item.id === id)
+  const entry = (session: MountedSession, id: string) => saved(session).value?.chats.find((item) => item.id === id)
   const pending = (id: string) => requests.pending.includes(id)
 
   const generate = (session: MountedSession, id: string) => {
@@ -49,9 +49,9 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
         .then((result) => {
           if (ctx.signal.aborted || controller.signal.aborted) return
           store.update((draft) => {
-            const question = draft.questions.find((item) => item.id === id)
+            const chat = draft.chats.find((item) => item.id === id)
 
-            if (question) question.answer = result.text.trim()
+            if (chat) chat.answer = result.text.trim()
           })
         })
         // A missing answer is the retry state; no transient error flag is stored.
@@ -102,7 +102,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
             if (signal.aborted) return
             batch(() => {
               store.update((draft) => {
-                draft.questions.push({ id, question })
+                draft.chats.push({ id, question })
               })
               ctx.layout.open(`${ctx.id}:${id}`, session, { tab: "select" })
             })
@@ -131,7 +131,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
     remove: (session: MountedSession, id: string) => {
       stop(id)
       saved(session).update((draft) => {
-        draft.questions = draft.questions.filter((item) => item.id !== id)
+        draft.chats = draft.chats.filter((item) => item.id !== id)
       })
     },
   }
