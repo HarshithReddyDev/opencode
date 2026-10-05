@@ -13,21 +13,18 @@ const instructions = [
 /** One-shot side questions per session, one tab each, stored until the tab closes. */
 export function createBtw(ctx: SetupContext<typeof Btw>) {
   const owner = getOwner()
-  const controllers = new Map<string, { session: string; controller: AbortController }>()
+  const controllers = new Map<string, AbortController>()
   const [requests, setRequests] = createStore<{ pending: string[] }>({ pending: [] })
   const saved = (session: MountedSession) => ctx.stores.questions(session)
 
   const stop = (id: string) => {
-    controllers.get(id)?.controller.abort()
+    controllers.get(id)?.abort()
     controllers.delete(id)
     setRequests("pending", (list) => list.filter((item) => item !== id))
   }
 
-  // Leaving a session abandons its in-flight questions; an unanswered question stays retryable.
-  createKeyed(
-    () => ctx.sessions.current()?.key,
-    (key) => onCleanup(() => controllers.forEach((request, id) => request.session === key && stop(id))),
-  )
+  // In-flight questions keep running when the user leaves their session and answer into its store; only a reload,
+  // closing the question's tab or disposing the extension abandons one, which leaves it retryable.
   onCleanup(() => Array.from(controllers.keys()).forEach(stop))
 
   const entry = (session: MountedSession, id: string) => saved(session).value?.questions.find((item) => item.id === id)
@@ -40,7 +37,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
 
     const store = saved(session)
     const controller = new AbortController()
-    controllers.set(id, { session: session.key, controller })
+    controllers.set(id, controller)
     setRequests("pending", (list) => [...list, id])
 
     return (
@@ -60,7 +57,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
         // A missing answer is the retry state; no transient error flag is stored.
         .catch(() => undefined)
         .finally(() => {
-          if (controllers.get(id)?.controller === controller) stop(id)
+          if (controllers.get(id) === controller) stop(id)
         })
     )
   }

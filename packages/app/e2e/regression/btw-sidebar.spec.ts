@@ -147,7 +147,7 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   const generations: { sessionID: string; prompt: string }[] = []
   const prompts: unknown[] = []
   const generated = Promise.withResolvers<void>()
-  const abandoned = Promise.withResolvers<void>()
+  const leftBehind = Promise.withResolvers<void>()
   const main = { id: "ses_btw_sidebar", title: "Side question session" }
   const other = { id: "ses_btw_sidebar_other", title: "Other side question session" }
   const ownerWarnings: string[] = []
@@ -166,7 +166,7 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
       if (input.sessionID === other.id) return { text: "This answer belongs to the **other session**." }
 
       if (input.prompt.includes("left behind")) {
-        await abandoned.promise
+        await leftBehind.promise
 
         return { text: "This answer arrived after the user left." }
       }
@@ -227,8 +227,16 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   await expectSessionTitle(page, other.title)
   await page.locator(`[data-titlebar-tab-link][href="${sessionHref(main.id)}"]`).click()
   await expectSessionTitle(page, main.title)
-  await expect(panel.getByText("Couldn’t answer that question", { exact: true })).toBeVisible()
-  abandoned.resolve()
+  // Leaving the session does not abandon its question: it is still working, and its answer lands once it arrives.
+  await expect(panel.getByRole("status")).toContainText("Working")
+  await page.getByRole("button", { name: "Home", exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  leftBehind.resolve()
+  await page.locator(`[data-titlebar-tab-link][href="${sessionHref(main.id)}"]`).click()
+  await expectSessionTitle(page, main.title)
+  await expect(panel.getByText("This answer arrived after the user left.", { exact: true })).toBeVisible()
+  await expect(panel.getByText("Couldn’t answer that question", { exact: true })).toHaveCount(0)
+  expect(generations.filter((item) => item.prompt.includes("left behind"))).toHaveLength(1)
 
   await page.reload()
   await expectSessionTitle(page, main.title)
@@ -236,7 +244,7 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
     "data-selected",
     "",
   )
-  await expect(panel.getByText("Couldn’t answer that question", { exact: true })).toBeVisible()
+  await expect(panel.getByText("This answer arrived after the user left.", { exact: true })).toBeVisible()
   await expect(panel.getByRole("status")).toHaveCount(0)
   await page.getByRole("tab", { name: "how does the retry loop work?", exact: true }).click()
   await expect(panel.getByText("exponential backoff", { exact: false })).toBeVisible()
