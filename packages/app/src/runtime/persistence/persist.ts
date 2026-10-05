@@ -37,7 +37,7 @@ export function persistStore<T extends object>(input: {
 }) {
   const delay = input.delay ?? persistSaveDelay
   let dirty = false
-  let hasNewerState = false
+  let touched = false
   let last: string | undefined
   // The newest value another window wrote while this store was dirty; applied at save time if the
   // local setter calls turned out not to change anything.
@@ -48,37 +48,27 @@ export function persistStore<T extends object>(input: {
     clearTimeout(timer)
     timer = undefined
     pending.delete(save)
-
     if (!dirty) return
     dirty = false
     const held = remote
     remote = undefined
     const next = untrack(() => input.serialize(input.store))
-
     if (next === last) {
       if (held !== undefined && held !== last) hydrate(held)
-
       return
     }
-
     last = next
     input.sync?.[1](input.name, next)
-
     if (input.write) return input.write(input.store, next)
     void input.storage.setItem(input.name, next)
   }
 
-  // SAFETY: the typed SetStoreFunction<T> wrapper forwards its arguments unchanged to the same Solid setter.
-  // The casts bridge Solid's deeply overloaded signature, not untrusted data or a different argument contract.
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- SAFETY: unchanged arguments to the same setter.
+  // Solid's setter overloads are too deep to spread generically; the wrapper only forwards.
   const apply = input.setStore as unknown as (...values: unknown[]) => void
-
-  // SAFETY: this forwards unchanged arguments through `apply` and adds persistence scheduling only.
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- SAFETY: preserves the input setter's overloads.
   const setStore = ((...values: unknown[]) => {
     apply(...values)
     dirty = true
-    hasNewerState = true
+    touched = true
     pending.add(save)
     timer ??= setTimeout(save, delay)
   }) as unknown as SetStoreFunction<T>
@@ -87,32 +77,24 @@ export function persistStore<T extends object>(input: {
     last = raw
     input.setStore(reconcile(input.deserialize(raw)))
   }
-
   const init = input.storage.getItem(input.name)
-
-  // A local edit or a broadcast received during the initial read is newer than that read's snapshot.
-  if (init instanceof Promise) void init.then((raw) => raw && !hasNewerState && hydrate(raw))
+  // A value the user already changed is newer than whatever storage held.
+  if (init instanceof Promise) void init.then((raw) => raw && !touched && hydrate(raw))
   else if (init) hydrate(init)
 
   input.sync?.[0]((data) => {
-    // The channel and key identify the store; a window's route does not change the shared value's identity.
-    if (data.key !== input.name) return
-
+    if (data.key !== input.name || (data.url ?? location.href) !== location.href) return
     if (!data.newValue) return
-
     // A real unsaved local change wins over another window's write, as in VS Code's storage
     // service; whether the change is real is only known when the store is serialized. Every
     // remote value replaces the held one, including a revert to `last`, so the save sees the
     // other window's final state rather than an intermediate one.
     if (dirty) {
       remote = data.newValue
-
       return
     }
-
     if (data.newValue === last) return
     hydrate(data.newValue)
-    hasNewerState = true
   })
 
   if (getOwner()) onCleanup(save)

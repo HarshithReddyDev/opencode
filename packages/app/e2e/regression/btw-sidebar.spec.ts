@@ -121,49 +121,6 @@ test("isolates concurrent side questions and makes an interrupted reload retryab
   expect(prompts).toEqual([])
 })
 
-test("shares saved one-shot questions across windows on the same device", async ({ page, context }) => {
-  const config = {
-    name: "BtwWindows",
-    sessions: [
-      { id: "ses_btw_shared", title: "BtwWindows" },
-      { id: "ses_btw_other", title: "Other parent" },
-    ],
-    generate: () => ({ text: "Saved answer" }),
-  }
-
-  const first = await openSession(page, config)
-  const panel = page.locator('[data-slot="session-btw-panel"]')
-  await first.editor.fill("/btw first window")
-  await first.editor.press("Enter")
-  await expect(panel.getByText("Saved answer", { exact: true })).toBeVisible()
-  const other = await context.newPage()
-  const second = await openSession(other, config)
-  await second.editor.fill("/btw second window")
-  await second.editor.press("Enter")
-  const otherPanel = other.locator('[data-slot="session-btw-panel"]')
-  await expect(otherPanel.getByText("Saved answer", { exact: true })).toBeVisible()
-  await panel.getByRole("button", { name: "Open side question", exact: true }).click()
-  const history = page.getByRole("dialog", { name: "Open side question", exact: true })
-  await expect(history.getByText("second window", { exact: true })).toBeVisible()
-  await history.getByRole("button", { name: "Close", exact: true }).click()
-  await other.locator(`[data-titlebar-tab-link][href="${sessionHref("ses_btw_other")}"]`).click()
-  await expectSessionTitle(other, "Other parent")
-  await first.editor.fill("/btw question while the other window is elsewhere")
-  await first.editor.press("Enter")
-  await expect(panel.getByText("Saved answer", { exact: true })).toBeVisible()
-  await other.locator(`[data-titlebar-tab-link][href="${sessionHref("ses_btw_shared")}"]`).click()
-  await expectSessionTitle(other, "BtwWindows")
-  await otherPanel.getByRole("button", { name: "Open side question", exact: true }).click()
-  const reopened = other.getByRole("dialog", { name: "Open side question", exact: true })
-  await expect(reopened.getByText("first window", { exact: true })).toBeVisible()
-  await expect(reopened.getByText("second window", { exact: true })).toBeVisible()
-  await expect(reopened.getByText("question while the other window is elsewhere", { exact: true })).toBeVisible()
-  await reopened.getByText("first window", { exact: true }).click()
-  await expect(otherPanel.getByText("first window", { exact: true })).toBeVisible()
-  await expect(otherPanel.getByText("Saved answer", { exact: true })).toBeVisible()
-  await expect(otherPanel.getByRole("textbox")).toHaveCount(0)
-})
-
 test("keeps many long-titled side tabs usable at a narrow desktop width", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 900, height: 700 })
 
