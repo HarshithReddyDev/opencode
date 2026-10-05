@@ -81,7 +81,7 @@ const setup: Setup<typeof Btw> = (ctx) => {
       tabs.set(input.session.key, cache)
 
       return input.open.flatMap((id) => {
-        if (saved.ready() && !btw.conversation(input.session, id)) return []
+        if (saved.ready() && !btw.question(input.session, id)) return []
 
         const existing = cache.get(id)
 
@@ -90,7 +90,7 @@ const setup: Setup<typeof Btw> = (ctx) => {
         const tab: PanelTab = {
           id,
           get title() {
-            return saved.value?.conversations.find((item) => item.id === id)?.title ?? ctx.t("tab.title")
+            return saved.value?.questions.find((item) => item.id === id)?.question ?? ctx.t("tab.title")
           },
           get hidden() {
             return !saved.ready()
@@ -98,7 +98,7 @@ const setup: Setup<typeof Btw> = (ctx) => {
           label: (state) => (
             <div class="flex min-w-0 items-center gap-1.5">
               <Icon name="bubble-5" size="small" />
-              <span class="truncate">{btw.conversation(state.session, id)?.title ?? ctx.t("tab.title")}</span>
+              <span class="truncate">{btw.question(state.session, id)?.question ?? ctx.t("tab.title")}</span>
             </div>
           ),
         }

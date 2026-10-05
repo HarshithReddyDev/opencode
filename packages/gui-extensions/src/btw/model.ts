@@ -5,29 +5,22 @@ import { showToast } from "@opencode/ui/toast"
 import { createKeyed, type MountedSession, type Persisted, type SetupContext } from "../sdk"
 import type Btw from "./index"
 
-const History = Schema.Struct({
-  conversations: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      title: Schema.String,
-      draft: Schema.String,
-      exchanges: Schema.Array(Schema.Struct({ question: Schema.String, answer: Schema.optional(Schema.String) })),
-    }),
+const QuestionHistory = Schema.Struct({
+  questions: Schema.Array(
+    Schema.Struct({ id: Schema.String, question: Schema.String, answer: Schema.optional(Schema.String) }),
   ),
 })
 
 const instructions = [
-  "The user is having a side conversation about the main conversation so far.",
+  "The user is asking a quick side question about the conversation so far.",
   "Answer directly and concisely in markdown from what you already know.",
   "Do not call any tools and do not take any actions.",
-  "The side conversation's earlier questions and answers are included below as JSON.",
-  "Continue that conversation by answering its final question.",
 ].join(" ")
 
-/** Device-local side histories, independent of the main session's messages and the layout's bounded cache. */
+/** Device-local one-shot side questions, independent of the main session's messages and the layout's bounded cache. */
 export function createBtw(ctx: SetupContext<typeof Btw>) {
   const owner = getOwner()
-  const stores = new Map<string, { saved: Persisted<typeof History.Type>; dispose: () => void }>()
+  const stores = new Map<string, { saved: Persisted<typeof QuestionHistory.Type>; dispose: () => void }>()
   const controllers = new Map<string, { session: string; controller: AbortController }>()
   const [requests, setRequests] = createStore<{ pending: string[] }>({ pending: [] })
 
@@ -36,11 +29,11 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
 
     if (existing) return existing.saved
 
-    // Runtime keys keep each parent's history lazy. Global scope avoids losing conversations when old layout
+    // Runtime keys keep each parent's history lazy. Global scope avoids losing questions when old layout
     // entries are pruned, and the stable session key keeps the history when the session moves directories.
     const entry = createRoot(
       (dispose) => ({
-        saved: ctx.storage.store(`conversations.${session.key}`, { schema: History, initial: { conversations: [] } }),
+        saved: ctx.storage.store(`questions.${session.key}`, { schema: QuestionHistory, initial: { questions: [] } }),
         dispose,
       }),
       owner,
@@ -57,7 +50,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
     setRequests("pending", (list) => list.filter((item) => item !== id))
   }
 
-  // Leaving a parent abandons its requests, but switching side tabs does not. Unanswered exchanges remain retryable.
+  // Leaving a parent abandons its requests, but switching side tabs does not. Unanswered questions remain retryable.
   createKeyed(
     () => ctx.sessions.current()?.key,
     (key) => onCleanup(() => controllers.forEach((request, id) => request.session === key && stop(id))),
@@ -80,23 +73,22 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
     stores.forEach((entry) => entry.dispose())
   })
 
-  const conversations = (session: MountedSession) => saved(session).value?.conversations ?? []
-  const conversation = (session: MountedSession, id: string) => conversations(session).find((item) => item.id === id)
+  const questions = (session: MountedSession) => saved(session).value?.questions ?? []
+  const question = (session: MountedSession, id: string) => questions(session).find((item) => item.id === id)
   const pending = (id: string) => requests.pending.includes(id)
 
   const error = (session: MountedSession, id: string) => {
-    const last = conversation(session, id)?.exchanges.at(-1)
+    const item = question(session, id)
 
-    return !!last && last.answer === undefined && !pending(id)
+    return !!item && item.answer === undefined && !pending(id)
   }
 
   const generate = (session: MountedSession, id: string) => {
-    const history = conversation(session, id)
+    const item = question(session, id)
 
-    if (!history || pending(id)) return
+    if (!item || pending(id)) return
 
     const store = saved(session)
-    const index = history.exchanges.length - 1
     const controller = new AbortController()
     controllers.set(id, { session: session.key, controller })
     setRequests("pending", (list) => [...list, id])
@@ -104,15 +96,15 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
     return (
       session.server.client.session
         .generate(
-          { sessionID: session.id, prompt: [instructions, JSON.stringify(history.exchanges)].join("\n\n") },
+          { sessionID: session.id, prompt: [instructions, item.question].join("\n\n") },
           { signal: controller.signal },
         )
         .then((result) => {
           if (ctx.signal.aborted || controller.signal.aborted) return
           store.update((draft) => {
-            const exchange = draft.conversations.find((item) => item.id === id)?.exchanges[index]
+            const question = draft.questions.find((item) => item.id === id)
 
-            if (exchange) exchange.answer = result.text.trim()
+            if (question) question.answer = result.text.trim()
           })
         })
         // A missing answer is the durable retry state; no transient spinner or error flag is stored.
@@ -162,7 +154,7 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
             if (signal.aborted) return
             batch(() => {
               store.update((draft) => {
-                draft.conversations.push({ id, title: question, draft: "", exchanges: [{ question }] })
+                draft.questions.push({ id, question })
               })
               ctx.layout.open(`${ctx.id}:${id}`, session, { tab: "select" })
             })
@@ -178,32 +170,12 @@ export function createBtw(ctx: SetupContext<typeof Btw>) {
   return {
     ask,
     saved,
-    conversations,
-    conversation,
+    questions,
+    question,
     pending,
     error,
     stop,
     open: (session: MountedSession, id: string) => ctx.layout.open(`${ctx.id}:${id}`, session, { tab: "select" }),
-    draft: (session: MountedSession, id: string, value: string) =>
-      saved(session).update((history) => {
-        const item = history.conversations.find((item) => item.id === id)
-
-        if (item) item.draft = value
-      }),
-    followUp: (session: MountedSession, id: string) => {
-      const question = conversation(session, id)?.draft.trim()
-
-      if (!question || pending(id) || error(session, id)) return
-      saved(session).update((history) => {
-        const item = history.conversations.find((item) => item.id === id)
-
-        if (!item) return
-        item.exchanges.push({ question })
-        item.draft = ""
-      })
-
-      return generate(session, id)
-    },
     retry: generate,
   }
 }

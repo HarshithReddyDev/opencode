@@ -4,11 +4,7 @@ import { Show } from "solid-js"
 import { useExtension, type DialogHandle, type MountedSession } from "../sdk"
 import type { BtwModel } from "./model"
 
-export default function SideConversationHistory(props: {
-  btw: BtwModel
-  session: MountedSession
-  dialog: DialogHandle
-}) {
+export default function SideQuestionHistory(props: { btw: BtwModel; session: MountedSession; dialog: DialogHandle }) {
   const ctx = useExtension()
 
   return (
@@ -25,9 +21,9 @@ export default function SideConversationHistory(props: {
         }
       >
         <List
-          items={() => [...props.btw.conversations(props.session)].reverse()}
+          items={() => [...props.btw.questions(props.session)].reverse()}
           key={(item) => item.id}
-          filterKeys={["title"]}
+          filterKeys={["question"]}
           search={{ placeholder: ctx.t("history.search"), autofocus: true }}
           emptyMessage={ctx.t("history.empty")}
           onSelect={(item) => {
@@ -36,7 +32,7 @@ export default function SideConversationHistory(props: {
             props.dialog.close()
           }}
         >
-          {(item) => <span class="min-w-0 truncate">{item.title}</span>}
+          {(item) => <span class="min-w-0 truncate">{item.question}</span>}
         </List>
       </Show>
     </Dialog>

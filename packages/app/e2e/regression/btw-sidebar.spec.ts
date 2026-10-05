@@ -3,14 +3,14 @@ import { sessionHref } from "../utils/app"
 import { openSession } from "../utils/workspace"
 import { expectSessionTitle } from "../utils/waits"
 
-test.use({ viewport: { width: 1440, height: 900 }, video: "off" })
+test.use({ viewport: { width: 1440, height: 900 } })
 
-test("keeps separate /btw conversations and restores them after reload", async ({ page }, testInfo) => {
+test("keeps separate one-shot /btw answers and restores them after reload", async ({ page }, testInfo) => {
   const prompts: unknown[] = []
   const generations: { sessionID: string; prompt: string }[] = []
 
   const { editor } = await openSession(page, {
-    name: "BtwConversations",
+    name: "BtwQuestions",
     onPrompt: (input) => prompts.push(input),
     generate: (input) => {
       generations.push(input)
@@ -18,9 +18,7 @@ test("keeps separate /btw conversations and restores them after reload", async (
       return {
         text: input.prompt.includes("second question")
           ? "Second answer"
-          : input.prompt.includes("follow up")
-            ? "First follow-up answer"
-            : `First answer\n\n${"A detailed explanation of the first question.\n\n".repeat(100)}End of first answer`,
+          : `First answer\n\n${"A detailed explanation of the first question.\n\n".repeat(100)}End of first answer`,
       }
     },
   })
@@ -29,6 +27,9 @@ test("keeps separate /btw conversations and restores them after reload", async (
   await editor.fill("/btw first question")
   await editor.press("Enter")
   await expect(panel.getByText("First answer", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Send", exact: true })).toHaveCount(0)
+  await panel.getByText("End of first answer", { exact: true }).scrollIntoViewIfNeeded()
   await expect(panel.getByText("End of first answer", { exact: true })).toBeInViewport()
   await editor.fill("/btw second question")
   await editor.press("Enter")
@@ -38,38 +39,25 @@ test("keeps separate /btw conversations and restores them after reload", async (
   await expect(first).toBeVisible()
   await expect(second).toHaveAttribute("data-selected", "")
   await page.screenshot({ path: testInfo.outputPath("separate-tabs.png") })
-  await first.click()
-  const input = panel.getByRole("textbox", { name: "Side conversation message" })
-  await expect(input).toBeEditable()
-  await input.fill("follow up")
-  await input.press("Enter")
-  await expect(panel.getByText("First follow-up answer", { exact: true })).toBeVisible()
-  await expect(panel.getByText("First follow-up answer", { exact: true })).toBeInViewport()
-  await expect(input).toBeFocused()
-  expect(generations).toHaveLength(3)
-  expect(generations[2]?.prompt).toContain("First answer")
-  expect(generations[2]?.prompt).not.toContain("second question")
-  expect(generations[2]?.prompt).not.toContain("Second answer")
-  await input.fill("Unsent draft")
-  await second.click()
+  expect(generations).toHaveLength(2)
+  expect(generations[1]?.prompt).not.toContain("first question")
+  expect(generations[1]?.prompt).not.toContain("First answer")
 
   await page.reload()
-  await expect(page.getByRole("tab", { name: "first question", exact: true })).toBeVisible()
-  await expect(page.getByRole("tab", { name: "second question", exact: true })).toHaveAttribute("data-selected", "")
+  await expect(first).toBeVisible()
+  await expect(second).toHaveAttribute("data-selected", "")
   await expect(panel.getByText("Second answer", { exact: true })).toBeVisible()
-  await page.getByRole("tab", { name: "first question", exact: true }).click()
+  await first.click()
   await expect(panel.getByText("First answer", { exact: true })).toBeVisible()
-  await expect(panel.getByText("First follow-up answer", { exact: true })).toBeVisible()
   await expect(panel.getByText("Second answer", { exact: true })).toHaveCount(0)
-  await expect(input).toHaveValue("Unsent draft")
-  await expect(panel.getByText("First follow-up answer", { exact: true })).toBeInViewport()
-  await page.screenshot({ path: testInfo.outputPath("restored-conversation.png") })
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("restored-answer.png") })
 
-  // Closing only hides the tab; reopening a saved conversation does not make another model request.
+  // Closing only hides a saved answer; reopening it does not make another model request.
   await first.click({ button: "middle" })
   await expect(first).toHaveCount(0)
-  await panel.getByRole("button", { name: "Open side conversation", exact: true }).click()
-  const history = page.getByRole("dialog", { name: "Open side conversation", exact: true })
+  await panel.getByRole("button", { name: "Open side question", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "Open side question", exact: true })
   await expect(history.getByRole("textbox")).toBeFocused()
   await history.getByRole("textbox").fill("first question")
   await expect(history.getByText("second question", { exact: true })).toHaveCount(0)
@@ -77,13 +65,12 @@ test("keeps separate /btw conversations and restores them after reload", async (
   await history.getByRole("textbox").press("Enter")
   await expect(history).toHaveCount(0)
   await expect(first).toHaveAttribute("data-selected", "")
-  await expect(panel.getByText("First follow-up answer", { exact: true })).toBeVisible()
-  await expect(input).toHaveValue("Unsent draft")
-  expect(generations).toHaveLength(3)
+  await expect(panel.getByText("First answer", { exact: true })).toBeVisible()
+  expect(generations).toHaveLength(2)
   expect(prompts).toEqual([])
 })
 
-test("isolates concurrent side requests and makes an interrupted reload retryable", async ({ page }) => {
+test("isolates concurrent side questions and makes an interrupted reload retryable", async ({ page }) => {
   const held = Promise.withResolvers<void>()
   const attempts: string[] = []
   const prompts: unknown[] = []
@@ -130,10 +117,11 @@ test("isolates concurrent side requests and makes an interrupted reload retryabl
   await page.getByRole("tab", { name: "slow question", exact: true }).click()
   await expect(panel.getByText("Retried answer", { exact: true })).toBeVisible()
   await expect(panel.getByText("Abandoned answer", { exact: true })).toHaveCount(0)
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
   expect(prompts).toEqual([])
 })
 
-test("shares saved side histories across windows on the same device", async ({ page, context }) => {
+test("shares saved one-shot questions across windows on the same device", async ({ page, context }) => {
   const config = {
     name: "BtwWindows",
     sessions: [
@@ -148,16 +136,14 @@ test("shares saved side histories across windows on the same device", async ({ p
   await first.editor.fill("/btw first window")
   await first.editor.press("Enter")
   await expect(panel.getByText("Saved answer", { exact: true })).toBeVisible()
-
   const other = await context.newPage()
   const second = await openSession(other, config)
   await second.editor.fill("/btw second window")
   await second.editor.press("Enter")
-  await expect(
-    other.locator('[data-slot="session-btw-panel"]').getByText("Saved answer", { exact: true }),
-  ).toBeVisible()
-  await panel.getByRole("button", { name: "Open side conversation", exact: true }).click()
-  const history = page.getByRole("dialog", { name: "Open side conversation", exact: true })
+  const otherPanel = other.locator('[data-slot="session-btw-panel"]')
+  await expect(otherPanel.getByText("Saved answer", { exact: true })).toBeVisible()
+  await panel.getByRole("button", { name: "Open side question", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "Open side question", exact: true })
   await expect(history.getByText("second window", { exact: true })).toBeVisible()
   await history.getByRole("button", { name: "Close", exact: true }).click()
   await other.locator(`[data-titlebar-tab-link][href="${sessionHref("ses_btw_other")}"]`).click()
@@ -167,34 +153,15 @@ test("shares saved side histories across windows on the same device", async ({ p
   await expect(panel.getByText("Saved answer", { exact: true })).toBeVisible()
   await other.locator(`[data-titlebar-tab-link][href="${sessionHref("ses_btw_shared")}"]`).click()
   await expectSessionTitle(other, "BtwWindows")
-  await panel.getByRole("textbox", { name: "Side conversation message" }).fill("Draft from the first window")
-  await other.reload()
-  await second.editor.fill("/btw third window question")
-  await second.editor.press("Enter")
-  await expect(
-    other.locator('[data-slot="session-btw-panel"]').getByText("Saved answer", { exact: true }),
-  ).toBeVisible()
-  await other
-    .locator('[data-slot="session-btw-panel"]')
-    .getByRole("button", { name: "Open side conversation", exact: true })
-    .click()
-  const reopened = other.getByRole("dialog", { name: "Open side conversation", exact: true })
+  await otherPanel.getByRole("button", { name: "Open side question", exact: true }).click()
+  const reopened = other.getByRole("dialog", { name: "Open side question", exact: true })
   await expect(reopened.getByText("first window", { exact: true })).toBeVisible()
   await expect(reopened.getByText("second window", { exact: true })).toBeVisible()
-  await expect(reopened.getByText("third window question", { exact: true })).toBeVisible()
   await expect(reopened.getByText("question while the other window is elsewhere", { exact: true })).toBeVisible()
-  await reopened.getByText("question while the other window is elsewhere", { exact: true }).click()
-  await expect(
-    other.locator('[data-slot="session-btw-panel"]').getByRole("textbox", { name: "Side conversation message" }),
-  ).toHaveValue("Draft from the first window")
-  await other
-    .locator('[data-slot="session-btw-panel"]')
-    .getByRole("button", { name: "Open side conversation", exact: true })
-    .click()
   await reopened.getByText("first window", { exact: true }).click()
-  await expect(
-    other.locator('[data-slot="session-btw-panel"]').getByRole("textbox", { name: "Side conversation message" }),
-  ).toHaveValue("")
+  await expect(otherPanel.getByText("first window", { exact: true })).toBeVisible()
+  await expect(otherPanel.getByText("Saved answer", { exact: true })).toBeVisible()
+  await expect(otherPanel.getByRole("textbox")).toHaveCount(0)
 })
 
 test("keeps many long-titled side tabs usable at a narrow desktop width", async ({ page }, testInfo) => {
@@ -216,13 +183,10 @@ test("keeps many long-titled side tabs usable at a narrow desktop width", async 
   }
 
   await expect(page.getByRole("tab", { name: /^Side \d+:/ })).toHaveCount(12)
-  const input = panel.getByRole("textbox", { name: "Side conversation message" })
-  await input.fill("A narrow-layout draft")
-  await expect(input).toBeInViewport()
-  await expect(panel.getByRole("button", { name: "Send", exact: true })).toBeInViewport()
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
   await page.reload()
   await expect(page.getByRole("tab", { name: /^Side \d+:/ })).toHaveCount(12)
-  await expect(input).toHaveValue("A narrow-layout draft")
+  await expect(panel.getByText("Saved overflow answer", { exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath("narrow-many-tabs.png") })
 })
 
@@ -268,7 +232,6 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   await suggestion.click()
   await expect(editor).toHaveText("/btw ")
   await editor.press("Enter")
-
   const panel = page.locator('[data-slot="session-btw-panel"]')
   await expect(panel).toBeHidden()
   await expect(page.getByText("Add a question after /btw", { exact: true })).toBeVisible()
@@ -278,7 +241,7 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   await editor.fill("/btw how does the retry loop work?")
   await editor.press("Enter")
   await expect(panel).toBeVisible()
-  await expect(panel.getByRole("textbox", { name: "Side conversation message" })).toBeEditable()
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
   await expect(panel.getByRole("status")).toContainText("Working")
   await expect(page.getByRole("tab", { name: "how does the retry loop work?", exact: true })).toHaveAttribute(
     "data-selected",
@@ -299,13 +262,11 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   await editor.fill("/btw what belongs here?")
   await editor.press("Enter")
   await expect(panel.getByText("other session", { exact: false })).toBeVisible()
-
   await page.locator(`[data-titlebar-tab-link][href="${sessionHref(main.id)}"]`).click()
   await expectSessionTitle(page, main.title)
   await expect(panel.getByText("exponential backoff", { exact: false })).toBeVisible()
   await expect(panel.getByText("other session", { exact: false })).toHaveCount(0)
 
-  // Leaving a session abandons its in-flight question, so it reads as failed on return.
   await editor.fill("/btw is this question left behind?")
   await editor.press("Enter")
   await expect(panel.getByRole("status")).toContainText("Working")
@@ -314,7 +275,6 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   await page.locator(`[data-titlebar-tab-link][href="${sessionHref(main.id)}"]`).click()
   await expectSessionTitle(page, main.title)
   await expect(panel.getByText("Couldn’t answer that question", { exact: true })).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
   abandoned.resolve()
 
   await page.reload()
@@ -325,7 +285,6 @@ test("answers /btw in the side panel without admitting a prompt", async ({ page 
   )
   await expect(panel.getByText("Couldn’t answer that question", { exact: true })).toBeVisible()
   await expect(panel.getByRole("status")).toHaveCount(0)
-  await expect(page.getByRole("tab", { name: "how does the retry loop work?", exact: true })).toBeVisible()
   await page.getByRole("tab", { name: "how does the retry loop work?", exact: true }).click()
   await expect(panel.getByText("exponential backoff", { exact: false })).toBeVisible()
   await page.getByRole("button", { name: "Home", exact: true }).click()
