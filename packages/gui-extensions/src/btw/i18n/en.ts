@@ -13,4 +13,5 @@ export default {
   "history.description": "Reopen a saved side conversation for this session",
   "history.search": "Search side conversations",
   "history.empty": "No saved side conversations",
+  "history.loading": "Loading side conversations…",
 }
