@@ -7,7 +7,7 @@ import { createMemoryComposerState, type Prompt } from "./state"
 import { createComposerSubmit } from "./submit"
 import type { ComposerStateTarget } from "./submission-state"
 
-// SAFETY: submission reads only the selected model's id and provider id; the fixture fills those and its name.
+// SAFETY: submission reads only the selected model's id, name, and provider id.
 const selectedModel = {
   id: "model-1",
   name: "Model 1",
@@ -66,7 +66,11 @@ function fresh(state: ComposerStateTarget, start: NewSessionComposerAdapter["sta
 
 function submitInput(
   adapter: ActiveComposerAdapter | NewSessionComposerAdapter,
-  notify = { missingSelection() {}, failed(_kind: "shell" | "command" | "prompt", cause: unknown) {} },
+  notify: Parameters<typeof createComposerSubmit>[0]["notify"] = {
+    missingSelection() {},
+    unqueueable() {},
+    failed() {},
+  },
   mode: "normal" | "shell" = "normal",
   commands: () => readonly { name: string }[] | undefined = () => [],
   history: string[] = [],
@@ -181,6 +185,7 @@ describe("Composer submission", () => {
     },
   ])("applies the selection before sending one captured value: $calls", async (row) => {
     const state = createMemoryComposerState({ prompt: "ship it" }).capture()
+    state.context.add({ type: "file", path: "notes.md", description: "the failing version" })
     const calls: string[] = []
     const admitted = Promise.withResolvers<Parameters<ComposerSession["data"]["session"]["prompt"]>[0]>()
     const target = session({ calls, current: () => row.current, prompt: async (value) => admitted.resolve(value) })
@@ -197,7 +202,11 @@ describe("Composer submission", () => {
       agent: "build",
       model: { providerID: "provider-1", modelID: "model-1", variant: "balanced" },
     })
+    // A file chip goes with this prompt only, like the TUI's mentionless files.
+    expect(request.files).toMatchObject([{ name: "notes.md", description: "the failing version" }])
+    expect(request.files?.[0]?.mention).toBeUndefined()
     expect(state.current()).toEqual([{ type: "text", content: "", start: 0, end: 0 }])
+    expect(state.context.items()).toEqual([])
   })
 
   test("applies the captured agent and model before a custom command without passing over its overrides", async () => {
@@ -289,7 +298,7 @@ describe("Composer submission", () => {
     }
     await submitInput(
       active(state, target, () => selected),
-      { missingSelection() {}, failed: (_kind, error) => failed.resolve(error) },
+      { missingSelection() {}, unqueueable() {}, failed: (_kind, error) => failed.resolve(error) },
       "normal",
       () => [{ name: "review" }],
     ).submit(new Event("submit"))
@@ -314,6 +323,7 @@ describe("Composer submission", () => {
     ]
 
     state.set(prompt)
+    state.context.add({ type: "file", path: "notes.md", description: "the failing version" })
     const attempts: string[] = []
     const statuses: ("idle" | "running")[] = []
     const first = Promise.withResolvers<void>()
@@ -330,6 +340,7 @@ describe("Composer submission", () => {
 
     const notify = {
       missingSelection() {},
+      unqueueable() {},
       failed: () => (attempts.length === 2 ? first.resolve() : second.resolve()),
     }
 
@@ -345,6 +356,9 @@ describe("Composer submission", () => {
     expect(new Set(attempts).size).toBe(1)
     expect(statuses).toEqual(["running", "idle", "running", "idle"])
     expect(state.current()).toEqual(prompt)
+    expect(state.context.items()).toMatchObject([
+      { type: "file", path: "notes.md", description: "the failing version" },
+    ])
     // The caret returns after the mention text; attachments take no caret positions.
     expect(state.cursor()).toBe(17)
     // The restored prompt is the draft again, so history does not also keep it (and its attachments).
@@ -374,9 +388,11 @@ describe("Composer submission", () => {
       return { session: target, cleanupReady: Promise.resolve() }
     })
 
-    await submitInput(adapter, { missingSelection() {}, failed: () => failed.resolve() }, "shell").submit(
-      new Event("submit"),
-    )
+    await submitInput(
+      adapter,
+      { missingSelection() {}, unqueueable() {}, failed: () => failed.resolve() },
+      "shell",
+    ).submit(new Event("submit"))
     await failed.promise
 
     expect(promoted.current()).toMatchObject([{ type: "text", content: "first prompt" }])

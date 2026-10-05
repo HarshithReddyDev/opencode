@@ -7,7 +7,7 @@ import type { ImageAttachmentPart, Prompt } from "./state"
 import { clonePrompt, promptLength } from "./prompt-parts"
 import type { ComposerAdapter, ComposerDelivery, ComposerSelection, ComposerSession } from "./adapter"
 import { createComposerSubmission } from "./submission-state"
-import { buildPromptRequest } from "./request"
+import { buildPromptRequest, noteComment } from "./request"
 import { setCursorPosition } from "./editor/dom"
 import { blobDataUrl, resolveBlobUrl } from "@/runtime/persistence/drafts"
 import { isAttachment } from "./prompt-parts"
@@ -42,7 +42,9 @@ type ComposerSubmitInput = {
   clientCommand?: (text: string) => (() => void | Promise<void>) | undefined
   notify: {
     missingSelection: () => void
-    failed: (kind: "shell" | "command" | "prompt", cause: unknown) => void
+    unqueueable: () => void
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejected send is opaque; the notifier formats it
+    failed: (kind: "shell" | "command" | "prompt", error: unknown) => void
   }
   comments: {
     capture: () => PromptHistoryComment[]
@@ -105,6 +107,13 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
       return
     }
 
+    // Like the TUI, a shell command runs now or not at all; it cannot wait in the queue.
+    if (read.mode === "shell" && read.delivery === "queue") {
+      input.notify.unqueueable()
+
+      return
+    }
+
     if (submitting.has(input.adapter.state)) return
 
     // Images restored from a draft or history carry ids only; the optimistic message shows their URLs.
@@ -154,9 +163,8 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
         await started.cleanupReady
         await started.complete?.()
         input.adapter.submitted()
-        submission.context
-          .filter((item) => !!item.comment?.trim())
-          .forEach((item) => submission.target().context.remove(item.key))
+        // Like the TUI, sent context goes with the prompt rather than riding along on the next one.
+        submission.context.forEach((item) => submission.target().context.remove(item.key))
         input.comments.clear()
         clearSubmission(input, submission)
         void sending.then((result) => {
@@ -206,6 +214,14 @@ function clearClientCommand(input: ComposerSubmitInput, prompt: Prompt) {
   input.closePopover()
 }
 
+function selectionModel(selection: ComposerSelection) {
+  const model: ComposerSelection["model"] & { variant?: string } = { ...selection.model }
+
+  if (selection.variant) model.variant = selection.variant
+
+  return model
+}
+
 function submissionText(prompt: Prompt) {
   return prompt.map((part) => ("content" in part ? part.content : "")).join("")
 }
@@ -231,32 +247,20 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
 
         if (!comment) return []
 
-        if (item.type === "note")
-          return [
-            {
-              type: "note",
-              origin: item.origin,
-              label: item.label,
-              icon: item.icon,
-              subject: item.subject,
-              href: item.href,
-              live: item.live ? { ...item.live } : undefined,
-              comment,
-            },
-          ]
+        if (item.type === "note") return [noteComment(item, comment)]
 
         return [
           {
             path: item.path,
             comment,
-            selection: item.selection ? { ...item.selection } : undefined,
+            selection: item.selection && { ...item.selection },
             preview: item.preview,
             origin: item.commentOrigin,
           },
         ]
       }),
       agent: value.selection.agent,
-      model: metadataModel(value.selection),
+      model: selectionModel(value.selection),
     },
     time: { created: Date.now() },
   }
@@ -273,6 +277,7 @@ function readSubmission(
 
   if (mode === "shell" && !text.trim()) return
   const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+  // Like the TUI's blank Enter, file chips alone send nothing; they wait for text.
   const comments = context.filter((item) => !!item.comment?.trim()).length
 
   if (!text.trim() && !prompt.some(isAttachment) && comments === 0) return
@@ -306,17 +311,6 @@ function readSubmission(
     selection,
     delivery: input.delivery?.(alternate) ?? "steer",
   }
-}
-
-type MetadataModel = ComposerSelection["model"] & { variant?: string }
-
-// Message metadata is JSON, so an absent variant is omitted rather than stored as undefined.
-function metadataModel(selection: ComposerSelection) {
-  const model: MetadataModel = { ...selection.model }
-
-  if (selection.variant) model.variant = selection.variant
-
-  return model
 }
 
 function currentSelection(input: ComposerSubmitInput): ComposerSelection | undefined {
@@ -380,6 +374,16 @@ function restoreSubmission(
             },
       ),
   )
+  restored.context.forEach((item) => {
+    if (item.type === "file" && !item.comment?.trim())
+      restored.target.context.add({
+        type: "file",
+        path: item.path,
+        selection: item.selection,
+        name: item.name,
+        description: item.description,
+      })
+  })
 
   // A recovered follow-up changes the payload, so it must use a new admission ID.
   if (value.mode === "normal" && restored.prompt === submission.prompt) {
@@ -435,7 +439,12 @@ async function sendCommand(
     sessionID: session.id,
     name: command.command,
     text: command.arguments,
-    files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
+    files: request.files.map((file) => ({
+      uri: file.uri,
+      name: file.name,
+      description: file.description,
+      mention: file.mention,
+    })),
     agents: request.agents,
     skills: request.skills,
     delivery: value.delivery,
@@ -489,7 +498,12 @@ async function sendPrompt(
     sessionID: session.id,
     delivery: value.delivery,
     text: request.text,
-    files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
+    files: request.files.map((file) => ({
+      uri: file.uri,
+      name: file.name,
+      description: file.description,
+      mention: file.mention,
+    })),
     agents: request.agents,
     skills: request.skills,
     metadata: {
@@ -497,7 +511,7 @@ async function sendPrompt(
       comments: request.comments,
       attachments: request.attachments,
       agent: value.selection.agent,
-      model: metadataModel(value.selection),
+      model: selectionModel(value.selection),
     },
   }
 
@@ -527,7 +541,8 @@ function failSubmission(
   input: ComposerSubmitInput,
   session: ComposerSession,
   kind: "shell" | "command" | "prompt",
-  cause: unknown,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejected send is opaque; the notifier formats it
+  error: unknown,
   restore: () => boolean,
   messageID?: string,
   rollback?: () => void,
@@ -537,5 +552,5 @@ function failSubmission(
   if (messageID) session.handoff?.clear(messageID)
   rollback?.()
   restore()
-  input.notify.failed(kind, cause)
+  input.notify.failed(kind, error)
 }
